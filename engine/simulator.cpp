@@ -13,7 +13,7 @@ const double EXPIRY_DAYS   = 30.0;
 const double RISK_FREE     = 0.015;
 const double IMPLIED_VOL   = 0.25;
 const int    CONTRACT_SIZE = 100;
-const double MIN_DELTA_GAP = 0.01;
+const double MIN_DELTA_GAP = 0.50;
 const double PRICE_SCALE   = 10000.0;
 const int    TRADING_START = 34200;   // 09:30:00
 const int    TRADING_END   = 57600;   // 16:00:00
@@ -76,7 +76,14 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
     while (std::getline(ob, ob_line) && std::getline(msg, msg_line)) {
         ++raw_rows;
 
-        // --- parse message: timestamp + event_type ---
+        // --- Step 1: reset hedge variables at top of every iteration ---
+        int    hedged             = 0;
+        int    shares_to_trade    = 0;
+        double exec_price         = 0.0;
+        double slippage_per_share = 0.0;
+        double total_slippage     = 0.0;
+
+        // --- Step 2: parse message: timestamp + event_type ---
         std::stringstream msg_ss(msg_line);
         std::string tok;
 
@@ -89,7 +96,7 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
         if (event_type == 7) continue;
         if (timestamp < TRADING_START || timestamp > TRADING_END) continue;
 
-        // --- parse orderbook: first 8 columns ---
+        // --- Step 2 (cont): parse orderbook: first 8 columns ---
         std::stringstream ob_ss(ob_line);
 
         auto next_ll = [&](long long& out) -> bool {
@@ -100,17 +107,17 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
 
         long long ask1_raw, ask_size1_raw, bid1_raw, bid_size1_raw;
         long long ask2_raw, ask_size2_raw, bid2_raw, bid_size2_raw;
-        if (!next_ll(ask1_raw))     continue;
+        if (!next_ll(ask1_raw))      continue;
         if (!next_ll(ask_size1_raw)) continue;
-        if (!next_ll(bid1_raw))     continue;
+        if (!next_ll(bid1_raw))      continue;
         if (!next_ll(bid_size1_raw)) continue;
-        if (!next_ll(ask2_raw))     continue;
+        if (!next_ll(ask2_raw))      continue;
         if (!next_ll(ask_size2_raw)) continue;
-        if (!next_ll(bid2_raw))     continue;
+        if (!next_ll(bid2_raw))      continue;
         if (!next_ll(bid_size2_raw)) continue;
 
-        double ask1 = ask1_raw / PRICE_SCALE;
-        double bid1 = bid1_raw / PRICE_SCALE;
+        double ask1   = ask1_raw / PRICE_SCALE;
+        double bid1   = bid1_raw / PRICE_SCALE;
         int bid_size1 = (int)bid_size1_raw;
         int ask_size1 = (int)ask_size1_raw;
         int bid_size2 = (int)bid_size2_raw;
@@ -119,33 +126,33 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
         // guard dummy / invalid prices
         if (ask1 <= 0.0 || bid1 <= 0.0 || ask1 >= 9999.0 || bid1 <= -9999.0) continue;
 
-        double mid_price = (ask1 + bid1) / 2.0;
-        double spread = ask1 - bid1;
+        // --- Step 3: market state ---
+        double mid_price   = (ask1 + bid1) / 2.0;
+        double spread      = ask1 - bid1;
         double half_spread = spread / 2.0;
 
         if (spread < 0.0 || mid_price <= 0.0) continue;
 
-        // --- Bootstrap: initialise state from the very first valid row ---
-        // dS, dt and time_since_last_hedge are all 0 on this row, so gamma
-        // and theta P&L are both zero and the hedge threshold is never crossed.
+        // Bootstrap: initialise state from the very first valid row.
+        // dS, dt, and time_since_last_hedge are all 0 on this row, so
+        // gamma P&L, theta P&L, and gamma_risk are all zero — no hedge fires.
         if (first_row) {
-            prev_mid       = mid_price;
-            prev_timestamp = timestamp;
+            prev_mid        = mid_price;
+            prev_timestamp  = timestamp;
             last_hedge_time = timestamp;
-            first_row      = false;
+            first_row       = false;
         }
 
-        // --- time variables ---
+        // --- Step 3 (cont): time variables ---
         double dt                    = timestamp - prev_timestamp;
         double time_since_last_hedge = timestamp - last_hedge_time;
 
-        // Bug 4 fix: both sides of the subtraction must be in years.
-        // Elapsed calendar time: seconds → calendar years (÷ 86400 × 365)
+        // T_remaining in years: elapsed calendar seconds → calendar years (÷ 86400 × 365)
         double T_remaining = std::max(
             EXPIRY_DAYS / 365.0 - (timestamp - TRADING_START) / (86400.0 * 365.0),
             0.001);
 
-        // --- greeks ---
+        // --- Step 4: greeks ---
         StraddleGreeks g;
         if (T_remaining <= 0.001) {
             g.delta = 0.0; g.gamma = 0.0; g.theta = 0.0;
@@ -153,12 +160,28 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
             g = short_straddle_greeks(mid_price, STRIKE, T_remaining, RISK_FREE, IMPLIED_VOL);
         }
 
-        // --- delta gap ---
+        // --- Step 5: delta gap ---
         double delta_gap_shares = (g.delta * CONTRACT_SIZE) + position_delta;
 
-        // --- hedge decision ---
-        // Bug 3 fix: convert time_since_last_hedge from seconds to trading years
-        // so the volatility term (sigma², annualised) is dimensionally consistent.
+        // --- Step 6: OFI ---
+        int bid_change = bid_size1 - prev_bid_size_1;
+        int ask_change = ask_size1 - prev_ask_size_1;
+
+        int ofi_single = 0;
+        if (bid_change > 0) ofi_single += 1;
+        if (bid_change < 0) ofi_single -= 1;
+        if (ask_change < 0) ofi_single += 1;
+        if (ask_change > 0) ofi_single -= 1;
+
+        ofi_deque.push_back(ofi_single);
+        if ((int)ofi_deque.size() > 50) {
+            rolling_ofi -= ofi_deque.front();
+            ofi_deque.pop_front();
+        }
+        rolling_ofi += ofi_single;
+
+        // --- Step 7: hedge decision ---
+        // time_since_last_hedge converted to trading years so sigma² (annualised) is consistent.
         double dt_years   = time_since_last_hedge / TRADING_SECS_PER_YEAR;
         double gamma_risk = 0.5 * std::abs(g.gamma)
                           * mid_price * mid_price
@@ -172,13 +195,7 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
                          && (std::abs(delta_gap_shares) > MIN_DELTA_GAP)
                          && (T_remaining > 0.001);
 
-        // --- execute hedge ---
-        int    hedged             = 0;
-        int    shares_to_trade    = 0;
-        double exec_price         = 0.0;
-        double slippage_per_share = 0.0;
-        double total_slippage     = 0.0;
-
+        // --- Step 8: execute hedge ---
         if (should_hedge) {
             shares_to_trade = (int)std::round(delta_gap_shares);
 
@@ -201,34 +218,17 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
             }
         }
 
-        // --- P&L components ---
-        // Bug 2 fix: dS = 0 on first row (prev_mid == mid_price) → no phantom gamma P&L.
+        // --- Step 9: P&L components ---
         double dS             = mid_price - prev_mid;
         double gamma_pnl_step = 0.5 * g.gamma * dS * dS * CONTRACT_SIZE;
         double theta_pnl_step = g.theta * (dt / 86400.0) * CONTRACT_SIZE;
         double net_pnl_step   = gamma_pnl_step + theta_pnl_step - total_slippage;
 
+        // --- Step 10: update cumulative P&L ---
         cumulative_gamma_pnl += gamma_pnl_step;
         cumulative_theta_pnl += theta_pnl_step;
 
-        // --- OFI ---
-        int bid_change = bid_size1 - prev_bid_size_1;
-        int ask_change = ask_size1 - prev_ask_size_1;
-
-        int ofi_single = 0;
-        if (bid_change > 0) ofi_single += 1;
-        if (bid_change < 0) ofi_single -= 1;
-        if (ask_change < 0) ofi_single += 1;
-        if (ask_change > 0) ofi_single -= 1;
-
-        ofi_deque.push_back(ofi_single);
-        if ((int)ofi_deque.size() > 50) {
-            rolling_ofi -= ofi_deque.front();
-            ofi_deque.pop_front();
-        }
-        rolling_ofi += ofi_single;
-
-        // --- write tick_log ---
+        // --- Step 11: write tick_log ---
         tick_out << std::fixed
                  << std::setprecision(6) << timestamp << ","
                  << std::setprecision(4) << mid_price << ","
@@ -258,7 +258,7 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
                  << slippage_per_share << ","
                  << std::setprecision(6) << total_slippage << "\n";
 
-        // --- write hedge_log ---
+        // --- Step 12: write hedge_log ---
         if (hedged) {
             hedge_out << std::fixed
                       << std::setprecision(6) << timestamp << ","
@@ -274,7 +274,7 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
                       << cumulative_tcost << "\n";
         }
 
-        // --- update state ---
+        // --- Step 13: update state ---
         prev_mid        = mid_price;
         prev_timestamp  = timestamp;
         prev_bid_size_1 = bid_size1;
