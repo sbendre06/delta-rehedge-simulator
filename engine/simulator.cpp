@@ -15,8 +15,8 @@ const double IMPLIED_VOL   = 0.25;
 const int    CONTRACT_SIZE = 100;
 const double MIN_DELTA_GAP = 0.50;
 const double PRICE_SCALE   = 10000.0;
-const int    TRADING_START = 34200;   // 09:30:00
-const int    TRADING_END   = 57600;   // 16:00:00
+const int    TRADING_START = 34200;   // 09:30
+const int    TRADING_END   = 57600;   // 16:00
 
 // Trading seconds per year: 252 days × 6.5 hours × 3600 s/hr
 static const double TRADING_SECS_PER_YEAR = 252.0 * 6.5 * 3600.0;
