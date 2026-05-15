@@ -3,3 +3,4 @@ data/raw/
 data/processed/*.csv
 engine/hedger
 research/.ipynb_checkpoints
+research/__pycache__
