@@ -2,4 +2,3 @@
 data/raw/
 data/processed/*.csv
 engine/hedger
-venv/
