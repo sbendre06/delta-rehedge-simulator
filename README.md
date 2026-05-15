@@ -12,7 +12,7 @@ $$\text{Hedge Cost} = \Delta_{\text{shares}} \times \frac{\text{spread}}{2}$$
 
 This creates a direct tension with the gamma P&L that motivates running the book in the first place:
 
-$$\text{Gamma P\&L} \approx \frac{1}{2} \,\Gamma S^2 \left(\sigma_{\text{realized}}^2 - \sigma_{\text{implied}}^2\right)$$
+$$\text{Gamma P+L} \approx \frac{1}{2} \,\Gamma S^2 \left(\sigma_{\text{realized}}^2 - \sigma_{\text{implied}}^2\right)$$
 
 Hedge too often and transaction costs dominate. Hedge too rarely and unhedged gamma exposure dominates. The optimal policy lives between these extremes and depends on three things that change continuously: gamma, current volatility, and the live bid-ask spread.
 
