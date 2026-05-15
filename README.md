@@ -8,11 +8,11 @@ A C++ simulation engine and Python analytics pipeline that finds the optimal reh
 
 Black-Scholes assumes continuous, costless hedging. In practice, every hedge crosses the bid-ask spread:
 
-$$\text{Hedge Cost} = \Delta_{\text{shares}} \times \frac{\text{spread}}{2}$$
+$$\text{Hedge Cost} = \Delta_{\text{shares}} \cdot \frac{\text{spread}}{2}$$
 
 This creates a direct tension with the gamma P&L that motivates running the book in the first place:
 
-$$\text{Gamma P+L} \approx \frac{1}{2} \cdot \Gamma S^2 \cdot \left(\sigma_{\text{realized}}^2 - \sigma_{\text{implied}}^2\right)$$
+$$\text{Gamma P+L} \approx \frac{1}{2} \cdot \Gamma \cdot S^2 \cdot \left(\sigma_{\text{realized}}^2 - \sigma_{\text{implied}}^2\right)$$
 
 Hedge too often and transaction costs dominate. Hedge too rarely and unhedged gamma exposure dominates. The optimal policy lives between these extremes and depends on three things that change continuously: gamma, current volatility, and the live bid-ask spread.
 
@@ -22,7 +22,7 @@ Hedge too often and transaction costs dominate. Hedge too rarely and unhedged ga
 
 At each tick, the engine evaluates a single comparison:
 
-$$\text{Hedge} \iff \underbrace{\frac{1}{2}\,\Gamma S^2 \sigma_t^2 \,\Delta t}_{\text{gamma risk from waiting}} > \underbrace{\Delta_{\text{shares}} \times \frac{\text{spread}}{2}}_{\text{cost of hedging now}}$$
+$$\text{Hedge} \iff \underbrace{\frac{1}{2} \cdot \Gamma \cdot S^2 \cdot \sigma_t^2 \cdot \Delta t}_{\text{gamma risk from waiting}} > \underbrace{\Delta_{\text{shares}} \cdot \frac{\text{spread}}{2}}_{\text{cost of hedging now}}$$
 
 The threshold is not static. $\sigma_t$ follows a calibrated Ornstein-Uhlenbeck process, so the rule responds dynamically to volatility regime changes — hedging more aggressively during vol spikes, less aggressively in calm periods.
 
@@ -32,7 +32,7 @@ The threshold is not static. $\sigma_t$ follows a calibrated Ornstein-Uhlenbeck 
 
 Realized volatility is modeled as an Ornstein-Uhlenbeck process:
 
-$$d\sigma_t = \kappa(\theta - \sigma_t)\,dt + \xi\,dW_t$$
+$$d\sigma_t = \kappa(\theta - \sigma_t)dt + \xi dW_t$$
 
 | Parameter | Meaning |
 |-----------|---------|
