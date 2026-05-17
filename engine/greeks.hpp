@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <cmath>
 
 #ifndef M_PI
@@ -49,6 +50,26 @@ inline double bs_theta_put(double S, double K, double T, double r, double sigma)
     double d2 = bs_d2(S, K, T, r, sigma);
     return -(S * norm_pdf(d1) * sigma / (2.0 * std::sqrt(T))
              - r * K * std::exp(-r * T) * norm_cdf(-d2)) / 365.0;
+}
+
+inline double bs_price_call(double S, double K, double T,
+                             double r, double sigma) {
+    if (T <= 0.0 || sigma <= 0.0 || S <= 0.0 || K <= 0.0)
+        return std::max(S - K, 0.0);
+    double d1 = bs_d1(S, K, T, r, sigma);
+    double d2 = bs_d2(S, K, T, r, sigma);
+    return S * norm_cdf(d1)
+           - K * std::exp(-r * T) * norm_cdf(d2);
+}
+
+inline double bs_price_put(double S, double K, double T,
+                            double r, double sigma) {
+    if (T <= 0.0 || sigma <= 0.0 || S <= 0.0 || K <= 0.0)
+        return std::max(K - S, 0.0);
+    double d1 = bs_d1(S, K, T, r, sigma);
+    double d2 = bs_d2(S, K, T, r, sigma);
+    return K * std::exp(-r * T) * norm_cdf(-d2)
+           - S * norm_cdf(-d1);
 }
 
 struct StraddleGreeks {

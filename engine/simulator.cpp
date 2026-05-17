@@ -39,7 +39,7 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
                  "delta_gap_shares,T_remaining,time_since_last_hedge,gamma_pnl_step,"
                  "theta_pnl_step,net_pnl_step,cumulative_gamma_pnl,cumulative_theta_pnl,"
                  "cumulative_tcost,rolling_ofi_50,hedged,shares_traded,exec_price,"
-                 "slippage_per_share,total_slippage\n";
+                 "slippage_per_share,total_slippage,mtm_pnl\n";
 
     hedge_out << "timestamp,mid_price,spread,delta_gap_shares,shares_traded,exec_price,"
                  "slippage_per_share,total_slippage,rolling_ofi_50,hedge_number,cumulative_tcost\n";
@@ -55,6 +55,10 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
     double cumulative_tcost      = 0.0;
     double cumulative_gamma_pnl  = 0.0;
     double cumulative_theta_pnl  = 0.0;
+    double initial_straddle_value = 0.0;
+    double cumulative_hedge_cash  = 0.0;
+    double final_mtm_pnl          = 0.0;
+    bool   straddle_initialized   = false;
     int    hedge_count           = 0;
     int    prev_bid_size_1       = 0;
     int    prev_ask_size_1       = 0;
@@ -133,24 +137,33 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
 
         if (spread < 0.0 || mid_price <= 0.0) continue;
 
+        // T_remaining in years — computed first so it is available to the bootstrap init.
+        double T_remaining = std::max(
+            EXPIRY_DAYS / 365.0 - (timestamp - TRADING_START) / (86400.0 * 365.0),
+            0.001);
+
         // Bootstrap: initialise state from the very first valid row.
-        // dS, dt, and time_since_last_hedge are all 0 on this row, so
-        // gamma P&L, theta P&L, and gamma_risk are all zero — no hedge fires.
+        // Must run before dt/time_since_last_hedge so those quantities are 0 on row 1,
+        // keeping gamma P&L, theta P&L, and gamma_risk all zero — no hedge fires.
         if (first_row) {
             prev_mid        = mid_price;
             prev_timestamp  = timestamp;
             last_hedge_time = timestamp;
             first_row       = false;
+
+            if (!straddle_initialized) {
+                double init_call = bs_price_call(mid_price, STRIKE,
+                                                 T_remaining, RISK_FREE, IMPLIED_VOL);
+                double init_put  = bs_price_put(mid_price, STRIKE,
+                                                T_remaining, RISK_FREE, IMPLIED_VOL);
+                initial_straddle_value = (init_call + init_put) * CONTRACT_SIZE;
+                straddle_initialized   = true;
+            }
         }
 
         // --- Step 3 (cont): time variables ---
         double dt                    = timestamp - prev_timestamp;
         double time_since_last_hedge = timestamp - last_hedge_time;
-
-        // T_remaining in years: elapsed calendar seconds → calendar years (÷ 86400 × 365)
-        double T_remaining = std::max(
-            EXPIRY_DAYS / 365.0 - (timestamp - TRADING_START) / (86400.0 * 365.0),
-            0.001);
 
         // --- Step 4: greeks ---
         StraddleGreeks g;
@@ -204,9 +217,10 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
                 slippage_per_share = std::abs(exec_price - mid_price);
                 total_slippage     = slippage_per_share * std::abs(shares_to_trade);
 
-                position_delta   -= (double)shares_to_trade;
-                cumulative_tcost += total_slippage;
-                last_hedge_time   = timestamp;
+                position_delta       -= (double)shares_to_trade;
+                cumulative_tcost     += total_slippage;
+                cumulative_hedge_cash += (double)shares_to_trade * exec_price;
+                last_hedge_time       = timestamp;
                 ++hedge_count;
                 hedged = 1;
 
@@ -224,9 +238,22 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
         double theta_pnl_step = g.theta * (dt / 86400.0) * CONTRACT_SIZE;
         double net_pnl_step   = gamma_pnl_step + theta_pnl_step - total_slippage;
 
+        // --- Step 9 (cont): mark-to-market P&L ---
+        double current_call  = bs_price_call(mid_price, STRIKE,
+                                             T_remaining, RISK_FREE, IMPLIED_VOL);
+        double current_put   = bs_price_put(mid_price, STRIKE,
+                                            T_remaining, RISK_FREE, IMPLIED_VOL);
+        double current_straddle_value = (current_call + current_put) * CONTRACT_SIZE;
+        double hedge_inventory_value  = position_delta * mid_price;
+        double mtm_pnl = initial_straddle_value
+                       - current_straddle_value
+                       + hedge_inventory_value
+                       + cumulative_hedge_cash;
+
         // --- Step 10: update cumulative P&L ---
         cumulative_gamma_pnl += gamma_pnl_step;
         cumulative_theta_pnl += theta_pnl_step;
+        final_mtm_pnl         = mtm_pnl;
 
         // --- Step 11: write tick_log ---
         tick_out << std::fixed
@@ -256,7 +283,8 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
                  << shares_to_trade << ","
                  << std::setprecision(4) << exec_price << ","
                  << slippage_per_share << ","
-                 << std::setprecision(6) << total_slippage << "\n";
+                 << std::setprecision(6) << total_slippage << ","
+                 << mtm_pnl << "\n";
 
         // --- Step 12: write hedge_log ---
         if (hedged) {
@@ -299,17 +327,19 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
     if (hedge_count > 1)
         avg_time_between_hedges = (prev_hedge_time - first_hedge_time) / (double)(hedge_count - 1);
 
-    double net_pnl = cumulative_gamma_pnl + cumulative_theta_pnl - cumulative_tcost;
+    double greek_net_pnl = cumulative_gamma_pnl + cumulative_theta_pnl - cumulative_tcost;
 
     sum_out << "total_events,total_hedges,total_gamma_pnl,total_theta_pnl,total_tcost,"
-               "net_pnl,avg_spread,avg_time_between_hedges,lambda_used,implied_vol_used,strike_used\n";
+               "greek_net_pnl,mtm_pnl,avg_spread,avg_time_between_hedges,"
+               "lambda_used,implied_vol_used,strike_used\n";
     sum_out << std::fixed << std::setprecision(6)
             << total_events << ","
             << hedge_count  << ","
             << cumulative_gamma_pnl << ","
             << cumulative_theta_pnl << ","
             << cumulative_tcost << ","
-            << net_pnl << ","
+            << greek_net_pnl << ","
+            << final_mtm_pnl << ","
             << avg_spread << ","
             << avg_time_between_hedges << ","
             << lambda << ","
@@ -325,7 +355,8 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
               << "Cumulative gamma P&L   : $" << cumulative_gamma_pnl  << "\n"
               << "Cumulative theta P&L   : $" << cumulative_theta_pnl  << "\n"
               << "Total transaction costs: $" << cumulative_tcost       << "\n"
-              << "Net P&L                : $" << net_pnl                << "\n"
+              << "Greek net P&L          : $" << greek_net_pnl          << "\n"
+              << "MTM P&L                : $" << final_mtm_pnl          << "\n"
               << std::setprecision(4)
               << "Average spread         : $" << avg_spread             << "\n"
               << std::setprecision(1)
