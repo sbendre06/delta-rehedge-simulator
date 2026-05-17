@@ -52,9 +52,9 @@ inline double bs_theta_put(double S, double K, double T, double r, double sigma)
 }
 
 struct StraddleGreeks {
-    double delta;   // net delta of the SHORT straddle position
-    double gamma;   // net gamma (negative — short gamma)
-    double theta;   // net theta per day (positive — short straddle earns theta)
+    double delta;
+    double gamma;
+    double theta;
 };
 
 inline StraddleGreeks short_straddle_greeks(double S, double K, double T, double r, double sigma) {
