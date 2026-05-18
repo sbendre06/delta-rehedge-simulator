@@ -1,3 +1,9 @@
+// simulator.cpp
+// Core simulation loop. Reads LOBSTER orderbook + message files together
+// Runs the delta-hedging decision rule at every tick, and writes three CSVs:
+//   tick_log.csv  — one row per valid market event
+//   hedge_log.csv — one row per hedge execution
+//   summary.csv   — single end-of-day summary row
 #include "greeks.hpp"
 #include <algorithm>
 #include <cmath>
@@ -8,17 +14,19 @@
 #include <sstream>
 #include <string>
 
-const double STRIKE        = 585.00;
+// SIMULATION PARAMS
+// held constant across a run; lambda passed in as CLI argument
+const double STRIKE        = 585.00;  // AAPL was ~$585 on 2012-06-21
 const double EXPIRY_DAYS   = 30.0;
-const double RISK_FREE     = 0.015;
-const double IMPLIED_VOL   = 0.25;
-const int    CONTRACT_SIZE = 100;
+const double RISK_FREE     = 0.015;   // annualised risk-free rate
+const double IMPLIED_VOL   = 0.25;    // implied vol the straddle was sold at
+const int    CONTRACT_SIZE = 100;     // shares per option contract
 const double MIN_DELTA_GAP = 0.50;
-const double PRICE_SCALE   = 10000.0;
-const int    TRADING_START = 34200;   // 09:30
-const int    TRADING_END   = 57600;   // 16:00
+const double PRICE_SCALE   = 10000.0; // LOBSTER integer price divisor
+const int    TRADING_START = 34200;   // 09:30:00
+const int    TRADING_END   = 57600;   // 16:00:00
 
-// Trading seconds per year: 252 days × 6.5 hours × 3600 s/hr
+
 static const double TRADING_SECS_PER_YEAR = 252.0 * 6.5 * 3600.0;
 
 void run_simulation(const std::string& ob_file, const std::string& msg_file, double lambda) {
@@ -44,30 +52,29 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
     hedge_out << "timestamp,mid_price,spread,delta_gap_shares,shares_traded,exec_price,"
                  "slippage_per_share,total_slippage,rolling_ofi_50,hedge_number,cumulative_tcost\n";
 
-    // --- simulation state ---
-    // Sentinel -1.0 flags "not yet seen a valid row"; set from the first valid tick.
+    // SIMULATION STATE
     double prev_mid        = -1.0;
     double prev_timestamp  = -1.0;
     double last_hedge_time = -1.0;
     bool   first_row       = true;
 
-    double position_delta        = 0.0;
-    double cumulative_tcost      = 0.0;
-    double cumulative_gamma_pnl  = 0.0;
-    double cumulative_theta_pnl  = 0.0;
-    double initial_straddle_value = 0.0;
-    double cumulative_hedge_cash  = 0.0;
-    double final_mtm_pnl          = 0.0;
+    double position_delta         = 0.0;
+    double cumulative_tcost       = 0.0;
+    double cumulative_gamma_pnl   = 0.0;
+    double cumulative_theta_pnl   = 0.0;
+    double initial_straddle_value = 0.0;  // premium received at open (CONTRACT_SIZE × (call + put))
+    double cumulative_hedge_cash  = 0.0;  // signed cash from hedge trades; slippage embedded via bid/ask exec
+    double final_mtm_pnl          = 0.0;  // persists the last mtm_pnl for the summary row
     bool   straddle_initialized   = false;
-    int    hedge_count           = 0;
-    int    prev_bid_size_1       = 0;
-    int    prev_ask_size_1       = 0;
-    int    prev_bid_size_2       = 0;
-    int    prev_ask_size_2       = 0;
-    int    rolling_ofi           = 0;
-    std::deque<int> ofi_deque;
+    int    hedge_count            = 0;
+    int    prev_bid_size_1        = 0;    // level-1 queue sizes from previous tick (for OFI)
+    int    prev_ask_size_1        = 0;
+    int    prev_bid_size_2        = 0;
+    int    prev_ask_size_2        = 0;
+    int    rolling_ofi            = 0;    // running sum of ofi_deque
+    std::deque<int> ofi_deque;            // last 50 per-event OFI values
 
-    // --- summary accumulators ---
+    // summary accumulators
     long long total_events  = 0;
     long long raw_rows      = 0;
     double spread_sum       = 0.0;
@@ -194,7 +201,9 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
         rolling_ofi += ofi_single;
 
         // --- Step 7: hedge decision ---
-        // time_since_last_hedge converted to trading years so sigma² (annualised) is consistent.
+        // gamma_risk ≈ expected dollar loss from unhedged gamma over [last_hedge, now].
+        // Uses ½ Γ S² σ² Δt — the Black-Scholes P&L from a price move of size σ√Δt.
+        // Hedge iff gamma_risk > λ × cost_of_crossing_spread.
         double dt_years   = time_since_last_hedge / TRADING_SECS_PER_YEAR;
         double gamma_risk = 0.5 * std::abs(g.gamma)
                           * mid_price * mid_price
@@ -213,6 +222,8 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
             shares_to_trade = (int)std::round(delta_gap_shares);
 
             if (shares_to_trade != 0) {
+                // Long delta → sell at bid. Short delta → buy at ask.
+                // Crossing the spread is the transaction cost; slippage = |exec - mid|.
                 exec_price         = (delta_gap_shares > 0.0) ? bid1 : ask1;
                 slippage_per_share = std::abs(exec_price - mid_price);
                 total_slippage     = slippage_per_share * std::abs(shares_to_trade);
@@ -239,6 +250,9 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
         double net_pnl_step   = gamma_pnl_step + theta_pnl_step - total_slippage;
 
         // --- Step 9 (cont): mark-to-market P&L ---
+        // Full position value = straddle P&L + hedge inventory + net cash from hedges.
+        // Slippage is already embedded in cumulative_hedge_cash (exec at bid/ask not mid),
+        // so cumulative_tcost must NOT be subtracted separately here.
         double current_call  = bs_price_call(mid_price, STRIKE,
                                              T_remaining, RISK_FREE, IMPLIED_VOL);
         double current_put   = bs_price_put(mid_price, STRIKE,
@@ -246,9 +260,9 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
         double current_straddle_value = (current_call + current_put) * CONTRACT_SIZE;
         double hedge_inventory_value  = position_delta * mid_price;
         double mtm_pnl = initial_straddle_value
-                       - current_straddle_value
-                       + hedge_inventory_value
-                       + cumulative_hedge_cash;
+                       - current_straddle_value   // straddle value change (positive if it fell)
+                       + hedge_inventory_value     // mark-to-market value of share inventory
+                       + cumulative_hedge_cash;    // cash paid/received across all hedges
 
         // --- Step 10: update cumulative P&L ---
         cumulative_gamma_pnl += gamma_pnl_step;
@@ -321,7 +335,7 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
         }
     }
 
-    // --- write summary.csv ---
+
     double avg_spread              = (total_events > 0) ? spread_sum / (double)total_events : 0.0;
     double avg_time_between_hedges = 0.0;
     if (hedge_count > 1)
@@ -346,7 +360,7 @@ void run_simulation(const std::string& ob_file, const std::string& msg_file, dou
             << IMPLIED_VOL << ","
             << STRIKE << "\n";
 
-    // --- final stdout summary ---
+    // final stdout summary
     std::cout << "\n=== Simulation Complete ===\n"
               << std::fixed << std::setprecision(2)
               << "Total rows read        : " << raw_rows     << "\n"

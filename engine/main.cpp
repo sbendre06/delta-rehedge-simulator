@@ -1,3 +1,6 @@
+// Entry point. Parses CLI args and delegates to run_simulation().
+// how to use: ./hedger <orderbook_file> <message_file> [lambda]
+// lambda = hedge threshold multiplier (default 1.0, frontier.py tries out eight different vals)
 #include <iostream>
 #include <string>
 
