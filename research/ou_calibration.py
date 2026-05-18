@@ -1,7 +1,7 @@
 """
 ou_calibration.py
-Calibrate an Ornstein-Uhlenbeck process to AAPL historical realized volatility.
-Run from the research/ directory: python ou_calibration.py
+Ornstein-Uhlenbeck process applied AAPL historical realized, validate assumed vol in C++ sim
+run from research/ directory: python ou_calibration.py
 """
 import os
 import numpy as np
@@ -13,8 +13,8 @@ import yfinance as yf
 
 def calibrate_ou(save_fig: bool = True) -> dict:
     """
-    Fit OU process to AAPL 21-day rolling realized vol (2010-01-01 to 2012-06-21).
-    Returns dict with keys: kappa, theta, xi.
+    fit OU process to AAPL 21-day rolling realized vol (2010-01-01 to 2012-06-21)
+    returns dict with keys: kappa, theta, xi
     """
     print("Downloading AAPL daily prices (2010-01-01 → 2012-06-21)...")
     raw = yf.download("AAPL", start="2010-01-01", end="2012-06-22",
