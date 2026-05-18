@@ -1,7 +1,7 @@
 """
 ofi_signal.py
-Analyse whether order flow imbalance at hedge execution predicts slippage quality.
-Run from the research/ directory: python ofi_signal.py
+does order flow imbalance at hedge execution predicts slippage quality?
+run from research/ directory: python ofi_signal.py
 """
 import os
 import numpy as np
@@ -13,7 +13,7 @@ from scipy import stats
 def analyze_ofi(hedge_log_path: str = "../data/processed/hedge_log.csv",
                 save_fig: bool = True) -> dict:
     """
-    Classify hedge events by OFI direction and compare execution slippage.
+    classify hedge events by OFI direction and compare execution slippage:
 
     Sign convention in hedge_log:
       shares_traded < 0  →  engine bought shares (paid the ask)
@@ -23,7 +23,7 @@ def analyze_ofi(hedge_log_path: str = "../data/processed/hedge_log.csv",
       Buying  + OFI < 0  →  sellers dominating, better prices for buys
       Selling + OFI > 0  →  buyers  dominating, better prices for sells
 
-    Returns dict with group stats, t-test results, and pct_improvement.
+    returns dict with group stats, t-test results, and pct_improvement
     """
     print(f"Loading hedge log from {hedge_log_path}...")
     df = pd.read_csv(hedge_log_path)
