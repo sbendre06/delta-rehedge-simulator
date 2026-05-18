@@ -1,21 +1,21 @@
-# Friction-Aware Delta Hedging
+# Hedging Tradeoffs: Slippage Costs vs Directional Risk in Options Market Making
 
-A C++ simulation engine and Python analytics pipeline that finds the optimal rehedge threshold for a short straddle market maker — balancing gamma exposure against transaction costs using real NASDAQ tick data.
+A C++ simulation engine and Python analytics pipeline that investigates rehedging strategies for a short straddle market maker — balancing delta exposure against transaction costs using real NASDAQ tick data.
 
 ---
 
-## The Problem
+## Problem Setup
 
-Black-Scholes assumes continuous, costless hedging. In practice every hedge crosses the bid-ask spread. A short straddle earns theta but bleeds on gamma moves; every hedge to control that bleed costs money. The tension is fundamental:
+Black-Scholes assumes continuous, costless hedging. In practice every hedge crosses the bid-ask spread. A short straddle earns theta but loses on strong directional moves; every hedge to control that bleed costs money.
 
 - **Hedge too often** → transaction costs dominate
-- **Hedge too rarely** → unhedged gamma exposure dominates
+- **Hedge too rarely** → unhedged delta risk and gamma exposure dominates
 
 The engine finds the optimal point by sweeping a threshold parameter λ and measuring the full mark-to-market P&L at each level.
 
 **Core hedge decision at every tick:**
 
-$$\text{Hedge} \iff \underbrace{\frac{1}{2}\,|\Gamma|\,S^2\,\sigma^2\,\Delta t}_{\text{gamma risk from waiting}} > \lambda \times \underbrace{\Delta_{\text{shares}} \times \frac{\text{spread}}{2}}_{\text{cost of hedging now}}$$
+$$\text{Hedge} \iff \underbrace{\frac{1}{2}\ \cdot |\Gamma|\ \cdot S^2\,\sigma^2\,\Delta t}_{\text{gamma risk from waiting}} > \lambda \times \underbrace{\Delta_{\text{shares}} \times \frac{\text{spread}}{2}}_{\text{cost of hedging now}}$$
 
 ---
 
