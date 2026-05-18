@@ -15,7 +15,7 @@ The engine finds the optimal point by sweeping a threshold parameter λ and meas
 
 **Core hedge decision at every tick:**
 
-$$\text{Hedge} \iff \underbrace{\frac{1}{2}\ \cdot |\Gamma|\ \cdot S^2\,\sigma^2\,\Delta t}_{\text{gamma risk from waiting}} > \lambda \times \underbrace{\Delta_{\text{shares}} \times \frac{\text{spread}}{2}}_{\text{cost of hedging now}}$$
+$$\text{Hedge} \iff \underbrace{\frac{1}{2}\ \cdot |\Gamma|\ \cdot S^2\ \cdot \sigma^2\ \cdot \Delta t}_{\text{gamma risk from waiting}} > \lambda \cdot \underbrace{\Delta_{\text{shares}} \cdot \frac{\text{spread}}{2}}_{\text{cost of hedging now}}$$
 
 ---
 
