@@ -1,7 +1,7 @@
 """
 frontier.py
-Sweep lambda values across the C++ engine to build the efficient P&L frontier.
-Run from the research/ directory: python frontier.py
+Test eight lambda values across the C++ engine to build efficient P&L frontier
+Run from research/ directory: python frontier.py
 """
 import os
 import subprocess
@@ -18,10 +18,9 @@ def run_engine(lambda_val: float,
                msg_file: str,
                engine_path: str = "../engine/hedger") -> dict:
     """
-    Run the C++ hedger for one lambda value.
-    Reads summary.csv and tick_log.csv written by the engine.
-    Returns a dict of aggregated results.
-    Raises RuntimeError if the engine exits with a non-zero return code.
+    run the C++ hedger for one lambda value
+    reads summary.csv and tick_log.csv written by the engine
+    returns a dict of aggregated results
     """
     result = subprocess.run(
         [engine_path, ob_file, msg_file, str(lambda_val)],
@@ -59,9 +58,9 @@ def run_frontier(
     engine_path: str = "../engine/hedger",
 ) -> pd.DataFrame:
     """
-    Run the engine for every lambda in LAMBDA_VALUES.
-    Saves results to ../data/processed/frontier_results.csv.
-    Returns a DataFrame with one row per lambda.
+    runs engine for every lambda in LAMBDA_VALUES
+    saves results to ../data/processed/frontier_results.csv
+    returns a DataFrame with one row per lambda
     """
     os.makedirs("../results/figures", exist_ok=True)
     print(f"Running frontier sweep over {len(LAMBDA_VALUES)} lambda values...")
@@ -89,8 +88,8 @@ def run_frontier(
 
 def plot_frontier(df: pd.DataFrame, save_fig: bool = True):
     """
-    Three-panel figure: efficient frontier, net P&L vs lambda, P&L decomposition.
-    Saves to ../results/figures/efficient_frontier.png.
+    three-panel figure: efficient frontier, net P&L vs lambda, P&L decomposition
+    saves to ../results/figures/efficient_frontier.png
     """
     optimal_idx = df["net_pnl"].idxmax()
     optimal_lam = df.loc[optimal_idx, "lambda_val"]
@@ -99,7 +98,7 @@ def plot_frontier(df: pd.DataFrame, save_fig: bool = True):
     plt.style.use("seaborn-v0_8-whitegrid")
     fig, axes = plt.subplots(1, 3, figsize=(17, 5))
 
-    # --- Panel 1: Efficient Frontier ---
+    # efficient frontier
     ax = axes[0]
     ax.plot(df["total_tcost"], df["delta_gap_variance"],
             "o-", color="steelblue", linewidth=1.5, markersize=7)
@@ -117,7 +116,7 @@ def plot_frontier(df: pd.DataFrame, save_fig: bool = True):
                 xy=(0.04, 0.06), xycoords="axes fraction",
                 fontsize=8, color="darkgreen", style="italic")
 
-    # --- Panel 2: Net P&L vs Lambda ---
+    # net P&L vs lambda
     ax = axes[1]
     ax.plot(df["lambda_val"], df["net_pnl"], "o-", color="steelblue",
             linewidth=1.5, markersize=7)
@@ -130,7 +129,7 @@ def plot_frontier(df: pd.DataFrame, save_fig: bool = True):
     ax.set_ylabel("Net P&L ($)")
     ax.legend(fontsize=9)
 
-    # --- Panel 3: P&L Decomposition stacked bar ---
+    # P&L decomp
     ax = axes[2]
     x = np.arange(len(df))
     theta_vals = df["total_theta_pnl"].values          # positive (income)
