@@ -31,7 +31,7 @@ $$\text{Hedge} \iff \underbrace{\frac{1}{2}\ \cdot |\Gamma|\ \cdot S^2\ \cdot \s
 ├── research/
 │   ├── ou_calibration.py   Fit OU process to historical AAPL realized vol
 │   ├── ofi_signal.py       OFI execution quality analysis
-│   ├── frontier.py         Lambda sweep → efficient frontier
+│   ├── frontier.py         Efficient frontier
 │   └── analysis.ipynb      Master results notebook
 │
 ├── data/
@@ -49,7 +49,7 @@ $$\text{Hedge} \iff \underbrace{\frac{1}{2}\ \cdot |\Gamma|\ \cdot S^2\ \cdot \s
 | Source | What it provides |
 |--------|-----------------|
 | [LOBSTER](https://lobsterdata.com) | AAPL NASDAQ order book at microsecond resolution — top-of-book bid/ask prices, sizes, and a message file linking each snapshot to its causing event (new order, cancellation, execution). Free academic sample covers one full trading day. Place files in `data/raw/`. |
-| `yfinance` — AAPL daily prices 2010–2012 | Used by `ou_calibration.py` to estimate OU parameters from historical realized volatility |
+| `yfinance`: AAPL daily prices 2010–2012 | Used by `ou_calibration.py` to estimate OU parameters from historical realized volatility |
 
 The simulation uses **June 21 2012** AAPL data. Simulation parameters match that date:
 
@@ -57,7 +57,7 @@ The simulation uses **June 21 2012** AAPL data. Simulation parameters match that
 |-----------|-------|-----------|
 | Strike | $585.00 | AAPL was trading ~$585 that day |
 | Expiry | 30 days | Standard liquid expiry |
-| Implied vol | 25% | Typical AAPL IV for that period |
+| Implied vol | 25% | Typical AAPL implied vol for that period |
 | Risk-free rate | 1.5% | June 2012 Fed funds environment |
 | Contract size | 100 shares | Standard US equity option |
 
@@ -107,9 +107,6 @@ Processes ~400k tick events in a few seconds and writes three files to `data/pro
 
 ### P&L Accounting
 
-The engine tracks two P&L measures:
-
-- **Greek decomposition** (`greek_net_pnl`): `theta + gamma − transaction costs`. Approximation — omits delta P&L accumulated between hedges.
 - **Mark-to-market** (`mtm_pnl`): `initial straddle value − current straddle value + hedge inventory value + cumulative hedge cash flows`. The primary figure. Slippage is embedded naturally because hedge trades execute at bid/ask rather than mid.
 
 ---
@@ -128,7 +125,7 @@ pip install pandas numpy matplotlib scipy yfinance
 
 Fits an Ornstein-Uhlenbeck process to AAPL 21-day rolling realized volatility (2010–2012):
 
-$$d\sigma_t = \kappa(\theta - \sigma_t)\,dt + \xi\,dW_t$$
+$$d\sigma_t = \kappa(\theta - \sigma_t) dt + \xi dW_t$$
 
 Parameters estimated via OLS on the AR(1) discretisation. Produces `results/figures/ou_calibration.png`.
 
@@ -146,7 +143,7 @@ python ofi_signal.py
 
 ### frontier.py
 
-Sweeps λ ∈ {0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0} by re-running the C++ engine for each value. Produces the efficient frontier (transaction costs vs. delta-gap variance), net P&L vs. λ, and a P&L decomposition chart. Takes ~1–2 minutes.
+Sweeps λ ∈ {0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0} by re-running the C++ engine for each value. Produces the efficient frontier (transaction costs vs. delta-gap variance), net P&L vs. λ, and a P&L decomposition chart.
 
 ```bash
 python frontier.py
@@ -154,7 +151,7 @@ python frontier.py
 
 ### analysis.ipynb
 
-Master notebook that runs all three analyses in sequence and produces a four-panel summary figure combining the price path, cumulative P&L, efficient frontier, and spread with hedge events overlaid.
+Shows combination of all previous results in one notebook.
 
 ```bash
 jupyter notebook analysis.ipynb
@@ -162,17 +159,6 @@ jupyter notebook analysis.ipynb
 
 ---
 
-## Key Findings
+## Key Findings & References
 
-**1. U-shaped P&L frontier.** Net MTM P&L is non-monotone in hedging frequency. There is an interior optimal λ where marginal gamma risk saved equals marginal transaction cost paid. Hedging more aggressively beyond this point destroys value. This empirically validates **Leland (1985)** using real order-book data.
-
-**2. OFI timing reduces slippage.** Hedges executed when order flow favours the required direction (buyers dominating when selling, sellers dominating when buying) achieve lower average slippage per share. The effect is consistent across both buy and sell hedges and survives a two-sample t-test.
-
-**3. The optimal threshold is regime-dependent.** Segmenting by spread width (a proxy for liquidity), the gamma risk level at which crossing the spread becomes worthwhile is meaningfully higher in illiquid periods. Market makers should carry more unhedged delta risk when spreads are wide — the cost of acting has risen.
-
----
-
-## References
-
-- Leland, H. E. (1985). *Option Pricing and Replication with Transactions Costs.* Journal of Finance, 40(5), 1283–1301.
-- LOBSTER: Limit Order Book System — The Efficient Reconstructor. Humboldt-Universität zu Berlin.
+Read whitepaper for full results reporting and discussion.
